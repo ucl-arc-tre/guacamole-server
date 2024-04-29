@@ -17,7 +17,6 @@
  * under the License.
  */
 
-
 #ifndef __GUAC_VNC_SETTINGS_H
 #define __GUAC_VNC_SETTINGS_H
 
@@ -82,6 +81,16 @@ typedef struct guac_vnc_settings {
      * compression only.
      */
     bool lossless;
+
+    /**
+     * The level of compression to ask the VNC client library to perform.
+     */
+    int compress_level;
+
+     /**
+      * The quality level to ask the VNC client library to maintain.
+      */
+    int quality_level;
 
 #ifdef ENABLE_VNC_REPEATER
     /**
@@ -275,6 +284,12 @@ typedef struct guac_vnc_settings {
      * as passwords, credit card numbers, etc.
      */
     bool recording_include_keys;
+
+    /**
+     * Whether existing files should be appended to when creating a new recording.
+     * Disabled by default.
+     */
+    bool recording_write_existing;
     
     /**
      * Whether or not to send the magic Wake-on-LAN (WoL) packet prior to
