@@ -20,11 +20,7 @@
 #
 # Dockerfile for guacamole-server
 #
-
-# The Alpine Linux image that should be used as the basis for the guacd image
-# NOTE: Using 3.18 because the required openssl1.1-compat-dev package was
-# removed in more recent versions.
-ARG ALPINE_BASE_IMAGE=3.18
+ARG ALPINE_BASE_IMAGE=latest
 FROM alpine:${ALPINE_BASE_IMAGE} AS builder
 
 # Install build dependencies
@@ -42,7 +38,7 @@ RUN apk add --no-cache                \
         libtool                       \
         libwebp-dev                   \
         make                          \
-        openssl1.1-compat-dev         \
+        openssl-dev                   \
         pango-dev                     \
         pulseaudio-dev                \
         util-linux-dev
@@ -101,7 +97,7 @@ ARG FREERDP_OPTS="\
     -DWITH_SERVER_INTERFACE=OFF \
     -DWITH_SHADOW_MAC=OFF \
     -DWITH_SHADOW_X11=OFF \
-    -DWITH_SSE2=OFF \
+    -DWITH_SSE2=ON \
     -DWITH_WAYLAND=OFF \
     -DWITH_X11=OFF \
     -DWITH_X264=OFF \
@@ -198,8 +194,7 @@ EXPOSE 4822
 
 # Start guacd, listening on port 0.0.0.0:4822
 #
-# Note the path here MUST correspond to the value specified in the 
+# Note the path here MUST correspond to the value specified in the
 # PREFIX_DIR build argument.
 #
 CMD /opt/guacamole/sbin/guacd -b 0.0.0.0 -L $GUACD_LOG_LEVEL -f
-
