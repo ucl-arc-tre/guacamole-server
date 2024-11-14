@@ -29,7 +29,7 @@
 # used for C headers, locating libraries, etc.
 export CFLAGS="-I${PREFIX_DIR}/include"
 export LDFLAGS="-L${PREFIX_DIR}/lib"
-export PKG_CONFIG_PATH="${PREFIX_DIR}/lib/pkgconfig" 
+export PKG_CONFIG_PATH="${PREFIX_DIR}/lib/pkgconfig"
 
 # Ensure thread stack size will be 8 MB (glibc's default on Linux) rather than
 # 128 KB (musl's default)
@@ -128,4 +128,3 @@ install_from_git "https://github.com/warmcat/libwebsockets" "$WITH_LIBWEBSOCKETS
 cd "$BUILD_DIR"
 autoreconf -fi && ./configure --prefix="$PREFIX_DIR" $GUACAMOLE_SERVER_OPTS
 make && make check && make install
-
