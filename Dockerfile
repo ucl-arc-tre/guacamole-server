@@ -22,7 +22,6 @@
 #
 ARG ALPINE_BASE_IMAGE=latest
 
-
 # The target architecture of the build. Valid values are "ARM" and "X86". By
 # default, this is detected automatically.
 ARG BUILD_ARCHITECTURE
@@ -159,9 +158,7 @@ FROM alpine:${ALPINE_BASE_IMAGE} AS builder
 ARG BUILD_DIR
 
 # Install build dependencies
-
-# Install build dependencies
-RUN apk add --no-cache                \
+RUN apk update && apk add --no-cache  \
         autoconf                      \
         automake                      \
         build-base                    \
@@ -180,8 +177,7 @@ RUN apk add --no-cache                \
         pulseaudio-dev                \
         sdl2-dev                      \
         sdl2_ttf-dev                  \
-        util-linux-dev                \
-        webkit2gtk-dev
+        util-linux-dev
 
 # Copy generic, automatic build script
 COPY ./src/guacd-docker/bin/autobuild.sh ${BUILD_DIR}/src/guacd-docker/bin/
