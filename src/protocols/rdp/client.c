@@ -22,6 +22,7 @@
 #include "channels/cliprdr.h"
 #include "channels/disp.h"
 #include "channels/pipe-svc.h"
+#include "channels/rail.h"
 #include "config.h"
 #include "fs.h"
 #include "log.h"
@@ -131,7 +132,7 @@ static int guac_rdp_join_pending_handler(guac_client* client) {
 
     /* Synchronize with current display */
     if (rdp_client->display != NULL) {
-        guac_common_display_dup(rdp_client->display, client, broadcast_socket);
+        guac_display_dup(rdp_client->display, broadcast_socket);
         guac_socket_flush(broadcast_socket);
     }
 
@@ -204,6 +205,13 @@ int guac_client_init(guac_client* client, int argc, char** argv) {
     guac_rdp_client* rdp_client = guac_mem_zalloc(sizeof(guac_rdp_client));
     client->data = rdp_client;
 
+    /* Create queue for input events (to avoid RDP I/O blocking processing of
+     * further Guacamole instructions) and associated signalling handle */
+    guac_fifo_init(&rdp_client->input_events, &rdp_client->input_events_items,
+            GUAC_RDP_INPUT_EVENT_QUEUE_SIZE, sizeof(guac_rdp_input_event));
+
+    rdp_client->input_event_queued = CreateEvent(NULL, TRUE, FALSE, NULL);
+
     /* Init clipboard */
     rdp_client->clipboard = guac_rdp_clipboard_alloc(client);
 
@@ -253,6 +261,10 @@ int guac_rdp_client_free_handler(guac_client* client) {
 
     /* Wait for client thread */
     pthread_join(rdp_client->client_thread, NULL);
+
+    /* Clean up event queue and associated signalling handle */
+    guac_fifo_destroy(&rdp_client->input_events);
+    CloseHandle(rdp_client->input_event_queued);
 
     /* Free parsed settings */
     if (rdp_client->settings != NULL)
