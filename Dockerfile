@@ -20,7 +20,11 @@
 #
 # Dockerfile for guacamole-server
 #
-ARG ALPINE_BASE_IMAGE=latest
+
+# The Alpine Linux image that should be used as the basis for the guacd image
+# NOTE: Using 3.22.2 because later versions of alpine uses cmake 4
+# but libvncserver requires cmake < 4.
+ARG ALPINE_BASE_IMAGE=3.22.2
 
 # The target architecture of the build. Valid values are "ARM" and "X86". By
 # default, this is detected automatically.
