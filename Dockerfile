@@ -103,7 +103,8 @@ ARG FREERDP_OPTS="\
     -DWITH_XRENDER=OFF \
     -DWITH_XTEST=OFF \
     -DWITH_XV=OFF \
-    -DWITH_ZLIB=ON"
+    -DWITH_ZLIB=ON \
+    -DCMAKE_C_FLAGS=-Wno-error=incompatible-pointer-types"
 
 ARG FREERDP_X86_OPTS=""
 
