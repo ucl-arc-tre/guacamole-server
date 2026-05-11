@@ -24,7 +24,7 @@
 # The Alpine Linux image that should be used as the basis for the guacd image
 # NOTE: Using 3.18 because the required openssl1.1-compat-dev package was
 # removed in more recent versions.
-ARG ALPINE_BASE_IMAGE=3.18
+ARG ALPINE_BASE_IMAGE=latest
 
 # The target architecture of the build. Valid values are "ARM" and "X86". By
 # default, this is detected automatically.
@@ -38,7 +38,7 @@ ARG BUILD_JOBS
 ARG BUILD_DIR=/tmp/guacamole-server
 
 # FreeRDP version (default to version 2)
-ARG FREERDP_VERSION=2
+ARG FREERDP_VERSION=3
 
 # The final install location for guacamole-server and all dependencies. NOTE:
 # This value is hard-coded in the entrypoint. Any change to this value must be
@@ -51,9 +51,6 @@ ARG PREFIX_DIR=/opt/guacamole
 # needed)
 #
 ARG WITH_FREERDP="${FREERDP_VERSION}(\.\d+)+"
-ARG WITH_LIBSSH2='libssh2-\d+(\.\d+)+'
-ARG WITH_LIBTELNET='\d+(\.\d+)+'
-ARG WITH_LIBVNCCLIENT='LibVNCServer-\d+(\.\d+)+'
 ARG WITH_LIBWEBSOCKETS='v\d+(\.\d+)+'
 
 #
@@ -66,6 +63,7 @@ ARG FREERDP_ARM_OPTS=""
 
 ARG FREERDP_OPTS="\
     -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_PKG_CONFIG_USE_CMAKE_PREFIX_PATH=ON \
     -DBUILTIN_CHANNELS=OFF \
     -DCHANNEL_URBDRC=OFF \
     -DWITH_ALSA=OFF \
@@ -117,30 +115,6 @@ ARG GUACAMOLE_SERVER_OPTS="\
 
 ARG GUACAMOLE_SERVER_X86_OPTS=""
 
-ARG LIBSSH2_ARM_OPTS=""
-
-ARG LIBSSH2_OPTS="\
-    -DBUILD_EXAMPLES=OFF \
-    -DBUILD_SHARED_LIBS=ON"
-
-ARG LIBSSH2_X86_OPTS=""
-
-ARG LIBTELNET_ARM_OPTS=""
-
-ARG LIBTELNET_OPTS="\
-    --disable-static \
-    --disable-util"
-
-ARG LIBTELNET_X86_OPTS=""
-
-ARG LIBVNCCLIENT_ARM_OPTS=""
-
-ARG LIBVNCCLIENT_OPTS=""
-
-ARG LIBVNCCLIENT_X86_OPTS=""
-
-ARG LIBWEBSOCKETS_ARM_OPTS=""
-
 ARG LIBWEBSOCKETS_OPTS="\
     -DDISABLE_WERROR=ON \
     -DLWS_WITHOUT_SERVER=ON \
@@ -162,77 +136,64 @@ FROM alpine:${ALPINE_BASE_IMAGE} AS builder
 ARG BUILD_DIR
 
 # Install build dependencies
-RUN apk add --no-cache                \
-        autoconf                      \
-        automake                      \
-        build-base                    \
-        cairo-dev                     \
-        cjson-dev                     \
-        cmake                         \
-        cunit-dev                     \
-        git                           \
-        grep                          \
-        krb5-dev                      \
-        libjpeg-turbo-dev             \
-        libpng-dev                    \
-        libtool                       \
-        libwebp-dev                   \
-        make                          \
-        openssl1.1-compat-dev         \
-        pango-dev                     \
-        pulseaudio-dev                \
-        sdl2-dev                      \
-        sdl2_ttf-dev                  \
-        util-linux-dev                \
-        webkit2gtk-dev
+RUN apk add --no-cache    \
+        autoconf \
+        automake \
+        build-base \
+        cairo-dev \
+        cmake \
+        clang \
+        ccache \
+        cunit-dev \
+        cups-dev \
+        docbook-xsl \
+        faac-dev \
+        faad2-dev \
+        ffmpeg-dev \
+        fuse3-dev \
+        git \
+        grep \
+        gsm-dev \
+        jansson-dev \
+        json-c-dev \
+        krb5-dev \
+        lame-dev \
+        libjpeg-turbo-dev \
+        libp11-dev \
+        libpng-dev \
+        libusb-dev \
+        libv-dev \
+        libx11-dev \
+        libxcursor-dev \
+        libxdamage-dev \
+        libxext-dev \
+        libxfixes-dev \
+        libxinerama-dev \
+        libxkbfile-dev \
+        libxrandr-dev \
+        libxrender-dev \
+        libxml2-dev \
+        libwebp-dev \
+        linux-pam-dev \
+        libtool \
+        make \
+        ninja \
+        opencl-headers \
+        openssl-dev \
+        opus-dev \
+        pango-dev \
+        pcsc-lite-dev \
+        pkgconf \
+        pulseaudio-dev \
+        sdl2-dev \
+        sdl2_ttf-dev \
+        uriparser-dev \
+        util-linux-dev \
+        wayland-dev \
+        xmlto
 
 # Copy generic, automatic build script
 COPY ./src/guacd-docker/bin/autobuild.sh ${BUILD_DIR}/src/guacd-docker/bin/
-
-#
-# Build dependency: libssh2
-#
-
-FROM builder AS libssh2
-ARG BUILD_DIR
-ARG LIBSSH2_ARM_OPTS
-ARG LIBSSH2_OPTS
-ARG LIBSSH2_X86_OPTS
-ARG PREFIX_DIR
-ARG WITH_LIBSSH2
-
-RUN ${BUILD_DIR}/src/guacd-docker/bin/autobuild.sh "LIBSSH2" \
-    "https://github.com/libssh2/libssh2"
-
-#
-# Build dependency: libtelnet
-#
-
-FROM builder AS libtelnet
-ARG BUILD_DIR
-ARG LIBTELNET_ARM_OPTS
-ARG LIBTELNET_OPTS
-ARG LIBTELNET_X86_OPTS
-ARG PREFIX_DIR
-ARG WITH_LIBTELNET
-
-RUN ${BUILD_DIR}/src/guacd-docker/bin/autobuild.sh "LIBTELNET" \
-    "https://github.com/seanmiddleditch/libtelnet"
-
-#
-# Build dependency: libvncclient
-#
-
-FROM builder AS libvncclient
-ARG BUILD_DIR
-ARG LIBVNCCLIENT_ARM_OPTS
-ARG LIBVNCCLIENT_OPTS
-ARG LIBVNCCLIENT_X86_OPTS
-ARG PREFIX_DIR
-ARG WITH_LIBVNCCLIENT
-
-RUN ${BUILD_DIR}/src/guacd-docker/bin/autobuild.sh "LIBVNCCLIENT" \
-    "https://github.com/LibVNC/libvncserver"
 
 #
 # Build dependency: libwebsockets
@@ -279,9 +240,6 @@ ARG PREFIX_DIR
 
 # Copy dependencies built in previous stages
 COPY --from=freerdp ${PREFIX_DIR} ${PREFIX_DIR}
-COPY --from=libssh2 ${PREFIX_DIR} ${PREFIX_DIR}
-COPY --from=libtelnet ${PREFIX_DIR} ${PREFIX_DIR}
-COPY --from=libvncclient ${PREFIX_DIR} ${PREFIX_DIR}
 COPY --from=libwebsockets ${PREFIX_DIR} ${PREFIX_DIR}
 
 # Use guacamole-server source from build context
