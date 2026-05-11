@@ -162,7 +162,7 @@ RUN apk add --no-cache    \
         libp11-dev \
         libpng-dev \
         libusb-dev \
-        libv-dev \
+        libxv-dev \
         libx11-dev \
         libxcursor-dev \
         libxdamage-dev \
