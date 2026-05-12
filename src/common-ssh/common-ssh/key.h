@@ -20,8 +20,6 @@
 #ifndef GUAC_COMMON_SSH_KEY_H
 #define GUAC_COMMON_SSH_KEY_H
 
-#include "config.h"
-
 #include <guacamole/client.h>
 #include <libssh2.h>
 
@@ -91,7 +89,7 @@ guac_common_ssh_key* guac_common_ssh_key_alloc(char* data, int length,
  * @return
  *     A statically-allocated string describing the most recent SSH key error.
  */
-const char* guac_common_ssh_key_error();
+const char* guac_common_ssh_key_error(void);
 
 /**
  * Frees all memory associated with the given key.

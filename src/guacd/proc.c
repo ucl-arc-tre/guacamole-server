@@ -150,7 +150,7 @@ static void guacd_proc_add_user(guacd_proc* proc, int fd, int owner) {
  * a process which does not have a PGID separate from the main guacd process
  * can result in guacd itself being terminated.
  */
-static void guacd_kill_current_proc_group() {
+static void guacd_kill_current_proc_group(void) {
 
     /* Forcibly kill all children within process group */
     if (kill(0, SIGKILL))
@@ -325,8 +325,8 @@ static void signal_stop_handler(int signal) {
 static void guacd_exec_proc(guacd_proc* proc, const char* protocol) {
 
     int result = 1;
-   
-    /* Set process group ID to match PID */ 
+
+    /* Set process group ID to match PID */
     if (setpgid(0, 0)) {
         guacd_log(GUAC_LOG_ERROR, "Cannot set PGID for connection process: %s",
                 strerror(errno));
@@ -357,7 +357,11 @@ static void guacd_exec_proc(guacd_proc* proc, const char* protocol) {
     guacd_proc_self = proc;
 
     /* Clean up and exit if SIGINT or SIGTERM signals are caught */
-    struct sigaction signal_stop_action = { .sa_handler = signal_stop_handler };
+    struct sigaction signal_stop_action = {
+        .sa_handler = signal_stop_handler,
+        /* Restart system calls interrupted by signal delivery */
+        .sa_flags = SA_RESTART
+    };
     sigaction(SIGINT, &signal_stop_action, NULL);
     sigaction(SIGTERM, &signal_stop_action, NULL);
 
@@ -371,7 +375,7 @@ static void guacd_exec_proc(guacd_proc* proc, const char* protocol) {
         owner = 0;
 
     }
-    
+
 cleanup_client:
 
     /* Request client to stop/disconnect */
@@ -393,7 +397,12 @@ cleanup_client:
 
     /* Verify whether children were all properly reaped */
     pid_t child_pid;
-    while ((child_pid = waitpid(0, NULL, WNOHANG)) > 0) {
+    while (1) {
+        GUAC_RETRY_EINTR(child_pid, waitpid(0, NULL, WNOHANG));
+
+        if (child_pid <= 0)
+            break;
+
         guacd_log(GUAC_LOG_DEBUG, "Automatically reaped unreaped "
                 "(zombie) child process with PID %i.", child_pid);
     }
@@ -496,14 +505,19 @@ guacd_proc* guacd_create_proc(const char* protocol) {
  */
 static void guacd_proc_kill(guacd_proc* proc) {
 
-    /* Request orderly termination of process */
-    if (kill(proc->pid, SIGTERM))
+    /* Request orderly termination of process group */
+    if (kill(-proc->pid, SIGTERM))
         guacd_log(GUAC_LOG_DEBUG, "Unable to request termination of "
                 "client process: %s ", strerror(errno));
 
     /* Wait for all processes within process group to terminate */
     pid_t child_pid;
-    while ((child_pid = waitpid(-proc->pid, NULL, 0)) > 0 || errno == EINTR) {
+    while (1) {
+        GUAC_RETRY_EINTR(child_pid, waitpid(-proc->pid, NULL, 0));
+
+        if (child_pid <= 0)
+            break;
+
         guacd_log(GUAC_LOG_DEBUG, "Child process %i of connection \"%s\" has terminated",
             child_pid, proc->client->connection_id);
     }

@@ -20,7 +20,6 @@
 #ifndef GUAC_RDP_SETTINGS_H
 #define GUAC_RDP_SETTINGS_H
 
-#include "config.h"
 #include "keymap.h"
 
 #include <freerdp/freerdp.h>
@@ -164,7 +163,7 @@ typedef struct guac_rdp_settings {
     /**
      * The port to connect to.
      */
-    int port;
+    unsigned short port;
 
     /**
      * The timeout, in seconds, to wait for the remote host to respond.
@@ -340,6 +339,11 @@ typedef struct guac_rdp_settings {
      * no channels whatsoever.
      */
     char** svc_names;
+
+    /**
+     * The maximum number of bytes to allow within the clipboard.
+     */
+    int clipboard_buffer_size;
 
     /**
      * Whether outbound clipboard access should be blocked. If set, it will not
@@ -624,7 +628,7 @@ typedef struct guac_rdp_settings {
      * FreeRDP prior to 1.2 which have gateway support ignore this value, and
      * instead use a hard-coded value of 443.
      */
-    int gateway_port;
+    unsigned short gateway_port;
 
     /**
      * The domain of the user authenticating with the remote desktop gateway,

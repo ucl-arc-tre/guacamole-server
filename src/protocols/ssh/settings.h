@@ -20,8 +20,6 @@
 #ifndef GUAC_SSH_SETTINGS_H
 #define GUAC_SSH_SETTINGS_H
 
-#include "config.h"
-
 #include <guacamole/user.h>
 
 #include <stdbool.h>
@@ -158,6 +156,11 @@ typedef struct guac_ssh_settings {
     int resolution;
 
     /**
+     * The maximum number of bytes to allow within the clipboard.
+     */
+    int clipboard_buffer_size;
+
+    /**
      * Whether outbound clipboard access should be blocked. If set, it will not
      * be possible to copy data from the terminal to the client using the
      * clipboard.
@@ -284,6 +287,12 @@ typedef struct guac_ssh_settings {
      * The integer ASCII code of the command to send for backspace.
      */
     int backspace;
+
+    /**
+     * The family of codes (e.g. vt100) which will be used when you push
+     * the function and keypad keys.
+     */
+    char* func_keys_and_keypad;
 
     /**
      * The terminal emulator type that is passed to the remote system.

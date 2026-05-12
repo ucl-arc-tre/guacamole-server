@@ -68,6 +68,105 @@ GCRY_THREAD_OPTION_PTHREAD_IMPL;
 
 char* GUAC_VNC_CLIENT_KEY = "GUAC_VNC";
 
+/**
+ * Returns a human-readable name for the given negotiated VNC security type.
+ *
+ * Security scheme values come from libvncclient/libvncserver:
+ *   - rfbproto.h
+ *   - rfbclient.h
+ *
+ * @param auth_scheme
+ *     The negotiated security type.
+ *
+ * @return
+ *     The human-readable name of the given security type, or "UNKNOWN" if no
+ *     known name exists.
+ */
+static const char* guac_vnc_auth_scheme_name(uint32_t auth_scheme) {
+
+    switch (auth_scheme) {
+        case rfbNoAuth:
+            return "None";
+
+        case rfbVncAuth:
+            return "VNC";
+
+        case rfbTLS:
+            return "TLS";
+
+        case rfbVeNCrypt:
+            return "VeNCrypt";
+
+        case rfbVeNCryptPlain:
+            return "VeNCrypt/Plain";
+
+        case rfbVeNCryptTLSNone:
+            return "VeNCrypt/TLSNone";
+
+        case rfbVeNCryptTLSVNC:
+            return "VeNCrypt/TLSVNC";
+
+        case rfbVeNCryptTLSPlain:
+            return "VeNCrypt/TLSPlain";
+
+        case rfbVeNCryptX509None:
+            return "VeNCrypt/X509None";
+
+        case rfbVeNCryptX509VNC:
+            return "VeNCrypt/X509VNC";
+
+        case rfbVeNCryptX509Plain:
+            return "VeNCrypt/X509Plain";
+
+        case rfbVeNCryptX509SASL:
+            return "VeNCrypt/X509SASL";
+
+        case rfbVeNCryptTLSSASL:
+            return "VeNCrypt/TLSSASL";
+    }
+
+    return "UNKNOWN";
+
+}
+
+/**
+ * Logs the negotiated VNC protocol version and security scheme selected for
+ * the given connection.
+ *
+ * @param client
+ *     The Guacamole client associated with the connection.
+ *
+ * @param rfb_client
+ *     The libvncclient connection state containing the negotiated protocol
+ *     and security information.
+ */
+static void guac_vnc_log_connection_security(guac_client* client,
+        rfbClient* rfb_client) {
+
+    const char* auth_name =
+        guac_vnc_auth_scheme_name(rfb_client->authScheme);
+
+    /* Some security protocols store the selected sub-authentication scheme
+     * separately. */
+    if (rfb_client->subAuthScheme != 0) {
+        const char* subauth_name =
+            guac_vnc_auth_scheme_name(rfb_client->subAuthScheme);
+
+        guac_client_log(client, GUAC_LOG_INFO,
+                "Connected using RFB %d.%d, security: %s (%u), sub-security: %s (%u).",
+                rfb_client->major, rfb_client->minor,
+                auth_name, rfb_client->authScheme,
+                subauth_name, rfb_client->subAuthScheme);
+    }
+    else {
+        guac_client_log(client, GUAC_LOG_INFO,
+                "Connected using RFB %d.%d, security: %s (%u).",
+                rfb_client->major, rfb_client->minor,
+                auth_name, rfb_client->authScheme);
+    }
+
+}
+
 #ifdef ENABLE_VNC_TLS_LOCKING
 /**
  * A callback function that is called by the VNC library prior to writing
@@ -139,6 +238,8 @@ rfbClient* guac_vnc_get_client(guac_client* client) {
 
     /* Framebuffer update handler */
     rfb_client->GotFrameBufferUpdate = guac_vnc_update;
+    /* Framebuffer finished frame handler */
+    rfb_client->FinishedFrameBufferUpdate = guac_vnc_finished_frame;
     vnc_client->rfb_GotCopyRect = rfb_client->GotCopyRect;
     rfb_client->GotCopyRect = guac_vnc_copyrect;
 
@@ -174,6 +275,9 @@ rfbClient* guac_vnc_get_client(guac_client* client) {
 
         /* Clipboard */
         rfb_client->GotXCutText = guac_vnc_cut_text;
+#ifdef LIBVNC_CLIENT_HAS_EXTENDED_CLIPBOARD
+        rfb_client->GotXCutTextUTF8 = guac_vnc_cut_text_utf8;
+#endif
 
         /* Set remote cursor */
         if (vnc_settings->remote_cursor) {
@@ -361,13 +465,12 @@ void* guac_vnc_client_thread(void* data) {
          */
         if (settings->wol_wait_time > 0) {
             guac_client_log(client, GUAC_LOG_DEBUG, "Sending Wake-on-LAN packet, "
-                    "and pausing for %d seconds.", settings->wol_wait_time);
+                "and retrying connection check %d times every %d seconds.",
+                GUAC_WOL_DEFAULT_CONNECT_RETRIES, settings->wol_wait_time);
 
-            /* char representation of a port should be, at most, 5 characters plus terminator. */
-            char* str_port = guac_mem_alloc(6);
-            if (guac_itoa(str_port, settings->port) < 1) {
-                guac_client_log(client, GUAC_LOG_ERROR, "Failed to convert port to integer for WOL function.");
-                guac_mem_free(str_port);
+            char str_port[GUAC_USHORT_STRING_BUFSIZE];
+            if (guac_itoa_safe(str_port, sizeof(str_port), settings->port) < 1) {
+                guac_client_log(client, GUAC_LOG_ERROR, "Failed to convert port to string for WOL function.");
                 return NULL;
             }
 
@@ -378,26 +481,27 @@ void* guac_vnc_client_thread(void* data) {
                     settings->wol_wait_time,
                     GUAC_WOL_DEFAULT_CONNECT_RETRIES,
                     settings->hostname,
-                    (const char *) str_port,
+                    str_port,
                     GUAC_WOL_DEFAULT_CONNECTION_TIMEOUT)) {
-                guac_client_log(client, GUAC_LOG_ERROR, "Failed to send WOL packet or connect to remote system.");
-                guac_mem_free(str_port);
+                guac_client_log(client, GUAC_LOG_ERROR, "Failed to send WOL packet, or connect to remote server.");
                 return NULL;
             }
-
-            guac_mem_free(str_port);
-
         }
 
-        /* Just send the packet and continue the connection, or return if failed. */
-        else if(guac_wol_wake(settings->wol_mac_addr,
+        /* Just send the packet, or return NULL if failed. */
+        else {
+            guac_client_log(client, GUAC_LOG_DEBUG, "Sending Wake-on-LAN packet.");
+
+            if (guac_wol_wake(settings->wol_mac_addr,
                     settings->wol_broadcast_addr,
                     settings->wol_udp_port)) {
-            guac_client_log(client, GUAC_LOG_ERROR, "Failed to send WOL packet.");
-            return NULL;
+                guac_client_log(client, GUAC_LOG_ERROR, "Failed to send WOL packet.");
+                return NULL;
+            }
         }
+
     }
-    
+
     /* Configure clipboard encoding */
     if (guac_vnc_set_clipboard_encoding(client, settings->clipboard_encoding)) {
         guac_client_log(client, GUAC_LOG_INFO, "Using non-standard VNC "
@@ -432,6 +536,9 @@ void* guac_vnc_client_thread(void* data) {
                 "Unable to connect to VNC server.");
         return NULL;
     }
+
+    /* Log negotiated protocol version and security scheme to aid debugging */
+    guac_vnc_log_connection_security(client, rfb_client);
 
 #ifdef ENABLE_PULSE
     /* If audio is enabled, start streaming via PulseAudio */

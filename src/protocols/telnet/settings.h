@@ -20,8 +20,6 @@
 #ifndef GUAC_TELNET_SETTINGS_H
 #define GUAC_TELNET_SETTINGS_H
 
-#include "config.h"
-
 #include <guacamole/user.h>
 
 #include <sys/types.h>
@@ -166,6 +164,11 @@ typedef struct guac_telnet_settings {
     int resolution;
 
     /**
+     * The maximum number of bytes to allow within the clipboard.
+     */
+    int clipboard_buffer_size;
+
+    /**
      * Whether outbound clipboard access should be blocked. If set, it will not
      * be possible to copy data from the terminal to the client using the
      * clipboard.
@@ -257,6 +260,12 @@ typedef struct guac_telnet_settings {
      * not specified in the client settings.
      */
     int backspace;
+
+    /**
+     * The family of codes (e.g. vt100) which will be used when you push
+     * the function and keypad keys.
+     */
+    char* func_keys_and_keypad;
 
     /**
      * The terminal emulator type that is passed to the remote system.

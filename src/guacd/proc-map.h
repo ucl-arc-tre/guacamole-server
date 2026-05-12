@@ -20,7 +20,6 @@
 #ifndef _GUACD_PROC_MAP_H
 #define _GUACD_PROC_MAP_H
 
-#include "config.h"
 #include "common/list.h"
 #include "proc.h"
 
@@ -31,6 +30,11 @@
  * of guacd.
  */
 #define GUACD_CLIENT_MAX_CONNECTIONS 65536
+
+/**
+ * The pthread stack size for the guacd daemon.
+ */
+#define GUACD_THREAD_STACK_SIZE 8388608
 
 /**
  * The number of hash buckets in each process map.
@@ -63,7 +67,7 @@ typedef struct guacd_proc_map {
  * @return
  *     A newly-allocated client process map.
  */
-guacd_proc_map* guacd_proc_map_alloc();
+guacd_proc_map* guacd_proc_map_alloc(void);
 
 /**
  * Free all resources allocated for the provided map. Note that this function

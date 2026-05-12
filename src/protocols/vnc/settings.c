@@ -22,12 +22,15 @@
 #include "argv.h"
 #include "client.h"
 #include "common/defaults.h"
+#include "common/clipboard.h"
 #include "settings.h"
 
 #include <guacamole/mem.h>
+#include <guacamole/string.h>
 #include <guacamole/user.h>
 #include <guacamole/wol-constants.h>
 
+#include <limits.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
@@ -88,6 +91,7 @@ const char* GUAC_VNC_CLIENT_ARGS[] = {
     "recording-include-keys",
     "create-recording-path",
     "recording-write-existing",
+    "clipboard-buffer-size",
     "disable-copy",
     "disable-paste",
     "disable-server-input",
@@ -173,9 +177,9 @@ enum VNC_ARGS_IDX {
 
     /**
      * The encoding to use for clipboard data sent to the VNC server if we are
-     * going to be deviating from the standard (which mandates ISO 8829-1).
-     * Valid values are "ISO8829-1" (the only legal value with respect to the
-     * VNC standard), "UTF-8", "UTF-16", and "CP2252".
+     * going to be deviating from the standard (which mandates ISO 8859-1).
+     * Valid values are "ISO8859-1" (the only legal value with respect to the
+     * VNC standard), "UTF-8", "UTF-16", "CP1252", and "MacRoman".
      */
     IDX_CLIPBOARD_ENCODING,
 
@@ -274,8 +278,8 @@ enum VNC_ARGS_IDX {
     IDX_SFTP_PASSPHRASE,
 
     /**
-     * The base64-encode public key to use when authentication with the SSH
-     * server for SFTP using key-based authentication.
+     * The base64-encoded public key to use when authentication with
+     * the SSH server for SFTP using key-based authentication.
      */
     IDX_SFTP_PUBLIC_KEY,
 
@@ -362,6 +366,11 @@ enum VNC_ARGS_IDX {
      * Disabled by default.
      */
     IDX_RECORDING_WRITE_EXISTING,
+
+    /**
+     * The maximum number of bytes to allow within the clipboard.
+     */
+    IDX_CLIPBOARD_BUFFER_SIZE,
 
     /**
      * Whether outbound clipboard access should be blocked. If set to "true",
@@ -452,9 +461,9 @@ guac_vnc_settings* guac_vnc_parse_args(guac_user* user,
         guac_user_parse_args_string(user, GUAC_VNC_CLIENT_ARGS, argv,
                 IDX_HOSTNAME, "");
 
-    settings->port =
-        guac_user_parse_args_int(user, GUAC_VNC_CLIENT_ARGS, argv,
-                IDX_PORT, 0);
+    settings->port = (unsigned short)
+        guac_user_parse_args_int_bounded(user, GUAC_VNC_CLIENT_ARGS, argv,
+                IDX_PORT, 0, GUAC_ITOA_USHORT_MIN, GUAC_ITOA_USHORT_MAX);
 
     settings->username =
         guac_user_parse_args_string(user, GUAC_VNC_CLIENT_ARGS, argv,
@@ -523,9 +532,9 @@ guac_vnc_settings* guac_vnc_parse_args(guac_user* user,
                 IDX_DEST_HOST, NULL);
 
     /* VNC repeater port */
-    settings->dest_port =
-        guac_user_parse_args_int(user, GUAC_VNC_CLIENT_ARGS, argv,
-                IDX_DEST_PORT, 0);
+    settings->dest_port = (unsigned short)
+        guac_user_parse_args_int_bounded(user, GUAC_VNC_CLIENT_ARGS, argv,
+                IDX_DEST_PORT, 0, GUAC_ITOA_USHORT_MIN, GUAC_ITOA_USHORT_MAX);
 #endif
 
     /* Set encodings if specified */
@@ -587,8 +596,8 @@ guac_vnc_settings* guac_vnc_parse_args(guac_user* user,
 
     /* Port for SFTP connection */
     settings->sftp_port =
-        guac_user_parse_args_string(user, GUAC_VNC_CLIENT_ARGS, argv,
-                IDX_SFTP_PORT, "22");
+        guac_user_parse_args_int_string_bounded(user, GUAC_VNC_CLIENT_ARGS, argv,
+                IDX_SFTP_PORT, "22", GUAC_ITOA_USHORT_MIN, GUAC_ITOA_USHORT_MAX);
 
     /* SFTP connection timeout */
     settings->sftp_timeout =
@@ -684,6 +693,27 @@ guac_vnc_settings* guac_vnc_parse_args(guac_user* user,
         guac_user_parse_args_boolean(user, GUAC_VNC_CLIENT_ARGS, argv,
                 IDX_DISABLE_COPY, false);
 
+    /* Set the maximum number of bytes to allow within the clipboard. */
+    settings->clipboard_buffer_size =
+        guac_user_parse_args_int(user, GUAC_VNC_CLIENT_ARGS, argv,
+                IDX_CLIPBOARD_BUFFER_SIZE, 0);
+
+    /* Use default clipboard buffer size if given one is invalid. */
+    if (settings->clipboard_buffer_size < GUAC_COMMON_CLIPBOARD_MIN_LENGTH) {
+        settings->clipboard_buffer_size = GUAC_COMMON_CLIPBOARD_MIN_LENGTH;
+        guac_user_log(user, GUAC_LOG_INFO, "Unspecified or invalid clipboard buffer "
+                "size: \"%s\". Using the default minimum size: %i.",
+                argv[IDX_CLIPBOARD_BUFFER_SIZE],
+                settings->clipboard_buffer_size);
+    }
+    else if (settings->clipboard_buffer_size > GUAC_COMMON_CLIPBOARD_MAX_LENGTH) {
+        settings->clipboard_buffer_size = GUAC_COMMON_CLIPBOARD_MAX_LENGTH;
+        guac_user_log(user, GUAC_LOG_WARNING, "Invalid clipboard buffer "
+                "size: \"%s\". Using the default maximum size: %i.",
+                argv[IDX_CLIPBOARD_BUFFER_SIZE],
+                settings->clipboard_buffer_size);
+    }
+
     /* Parse clipboard paste disable flag */
     settings->disable_paste =
         guac_user_parse_args_boolean(user, GUAC_VNC_CLIENT_ARGS, argv,
@@ -697,9 +727,9 @@ guac_vnc_settings* guac_vnc_parse_args(guac_user* user,
     if (settings->wol_send_packet) {
         
         /* If WoL has been enabled but no MAC provided, log warning and disable. */
-        if(strcmp(argv[IDX_WOL_MAC_ADDR], "") == 0) {
-            guac_user_log(user, GUAC_LOG_WARNING, "Wake on LAN was requested, ",
-                    "but no MAC address was specified.  WoL will not be sent.");
+        if (strcmp(argv[IDX_WOL_MAC_ADDR], "") == 0) {
+            guac_user_log(user, GUAC_LOG_WARNING, "WoL was enabled, but no "
+                    "MAC address was provided. WoL will not be sent.");
             settings->wol_send_packet = false;
         }
         
@@ -715,8 +745,8 @@ guac_vnc_settings* guac_vnc_parse_args(guac_user* user,
         
         /* Parse the WoL broadcast port. */
         settings->wol_udp_port = (unsigned short)
-            guac_user_parse_args_int(user, GUAC_VNC_CLIENT_ARGS, argv,
-                IDX_WOL_UDP_PORT, GUAC_WOL_PORT);
+            guac_user_parse_args_int_bounded(user, GUAC_VNC_CLIENT_ARGS, argv,
+                IDX_WOL_UDP_PORT, GUAC_WOL_PORT, GUAC_ITOA_USHORT_MIN, GUAC_ITOA_USHORT_MAX);
         
         /* Parse the WoL wait time. */
         settings->wol_wait_time =

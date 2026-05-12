@@ -20,8 +20,6 @@
 #ifndef __GUACD_LOG_H
 #define __GUACD_LOG_H
 
-#include "config.h"
-
 #include <guacamole/client.h>
 
 /**
@@ -65,7 +63,7 @@ void guacd_log_guac_error(guac_client_log_level level, const char* message);
  * Logs a reasonable explanatory message regarding handshake failure based on
  * the current value of guac_error.
  */
-void guacd_log_handshake_failure();
+void guacd_log_handshake_failure(void);
 
 #endif
 

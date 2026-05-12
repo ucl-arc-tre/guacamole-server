@@ -17,6 +17,8 @@
  * under the License.
  */
 
+#include "config.h"
+
 #include "argv.h"
 #include "beep.h"
 #include "channels/audio-input/audio-buffer.h"
@@ -100,6 +102,20 @@ static BOOL rdp_freerdp_load_channels(freerdp* instance) {
     guac_rdp_client* rdp_client = (guac_rdp_client*) client->data;
     guac_rdp_settings* settings = rdp_client->settings;
 
+    /* Load RAIL plugin if RemoteApp in use */
+    if (settings->remote_app != NULL)
+        guac_rdp_rail_load_plugin(context);
+
+    /* Load SVC plugin instances for all static channels */
+    if (settings->svc_names != NULL) {
+
+        char** current = settings->svc_names;
+        do {
+            guac_rdp_pipe_svc_load_plugin(context, *current);
+        } while (*(++current) != NULL);
+
+    }
+
     /* Load "disp" plugin for display update */
     if (settings->resize_method == GUAC_RESIZE_DISPLAY_UPDATE)
         guac_rdp_disp_load_plugin(context);
@@ -177,20 +193,6 @@ static BOOL rdp_freerdp_pre_connect(freerdp* instance) {
 
     /* Init FreeRDP add-in provider */
     freerdp_register_addin_provider(freerdp_channels_load_static_addin_entry, 0);
-
-    /* Load RAIL plugin if RemoteApp in use */
-    if (settings->remote_app != NULL)
-        guac_rdp_rail_load_plugin(context);
-
-    /* Load SVC plugin instances for all static channels */
-    if (settings->svc_names != NULL) {
-
-        char** current = settings->svc_names;
-        do {
-            guac_rdp_pipe_svc_load_plugin(context, *current);
-        } while (*(++current) != NULL);
-
-    }
 
     /* Init FreeRDP internal GDI implementation */
     if (!gdi_init(instance, guac_rdp_get_native_pixel_format(FALSE)))
@@ -466,6 +468,10 @@ static int rdp_guac_client_wait_for_events(guac_client* client,
 
     }
 
+    /* Bail out if FreeRDP has recorded a connection error */
+    if (freerdp_get_last_error(GUAC_RDP_CONTEXT(rdp_inst)) != FREERDP_ERROR_SUCCESS)
+        return -1;
+
     /* Wait was successful */
     return 1;
 
@@ -618,13 +624,15 @@ static int guac_rdp_handle_connection(guac_client* client) {
         if (wait_result < 0)
             break;
 
-        int connection_closing;
+        int connection_closing = 0;
         do {
 
             /* Handle any queued FreeRDP events (this may result in RDP messages
              * being sent), aborting later if FreeRDP event handling fails */
-            if (!guac_rdp_handle_events(rdp_client))
+            if (!guac_rdp_handle_events(rdp_client)) {
                 wait_result = -1;
+                break;
+            }
 
             /* Test whether the RDP server is closing the connection */
 #ifdef HAVE_DISCONNECT_CONTEXT
@@ -737,13 +745,12 @@ void* guac_rdp_client_thread(void* data) {
          */
         if (settings->wol_wait_time > 0) {
             guac_client_log(client, GUAC_LOG_DEBUG, "Sending Wake-on-LAN packet, "
-                    "and pausing for %d seconds.", settings->wol_wait_time);
+                "and retrying connection check %d times every %d seconds.",
+                GUAC_WOL_DEFAULT_CONNECT_RETRIES, settings->wol_wait_time);
 
-            /* char representation of a port should be, at most, 5 digits plus terminator. */
-            char* str_port = guac_mem_alloc(6);
-            if (guac_itoa(str_port, settings->port) < 1) {
-                guac_client_log(client, GUAC_LOG_ERROR, "Failed to convert port to integer for WOL function.");
-                guac_mem_free(str_port);
+            char str_port[GUAC_USHORT_STRING_BUFSIZE];
+            if (guac_itoa_safe(str_port, sizeof(str_port), settings->port) < 1) {
+                guac_client_log(client, GUAC_LOG_ERROR, "Failed to convert port to string for WOL function.");
                 return NULL;
             }
 
@@ -754,26 +761,27 @@ void* guac_rdp_client_thread(void* data) {
                     settings->wol_wait_time,
                     GUAC_WOL_DEFAULT_CONNECT_RETRIES,
                     settings->hostname,
-                    (const char *) str_port,
-                    GUAC_WOL_DEFAULT_CONNECTION_TIMEOUT)) {
-                guac_client_log(client, GUAC_LOG_ERROR, "Failed to send WOL packet, or server failed to wake up.");
-                guac_mem_free(str_port);
+                    str_port,
+                    settings->timeout)) {
+                guac_client_log(client, GUAC_LOG_ERROR, "Failed to send WOL packet, or connect to remote server.");
                 return NULL;
             }
-
-            guac_mem_free(str_port);
-
         }
 
-        /* Just send the packet and continue the connection, or return if failed. */
-        else if(guac_wol_wake(settings->wol_mac_addr,
+        /* Just send the packet, or return NULL if failed. */
+        else {
+            guac_client_log(client, GUAC_LOG_DEBUG, "Sending Wake-on-LAN packet.");
+
+            if (guac_wol_wake(settings->wol_mac_addr,
                     settings->wol_broadcast_addr,
                     settings->wol_udp_port)) {
-            guac_client_log(client, GUAC_LOG_ERROR, "Failed to send WOL packet.");
-            return NULL;
+                guac_client_log(client, GUAC_LOG_ERROR, "Failed to send WOL packet.");
+                return NULL;
+            }
         }
+
     }
-    
+
     /* If audio enabled, choose an encoder */
     if (settings->audio_enabled) {
 

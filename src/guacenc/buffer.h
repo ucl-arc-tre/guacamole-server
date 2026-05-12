@@ -20,8 +20,6 @@
 #ifndef GUACENC_BUFFER_H
 #define GUACENC_BUFFER_H
 
-#include "config.h"
-
 #include <cairo/cairo.h>
 
 #include <stdbool.h>
@@ -82,7 +80,7 @@ typedef struct guacenc_buffer {
  *     A newly-allocated and initialized guacenc_buffer, or NULL if allocation
  *     fails.
  */
-guacenc_buffer* guacenc_buffer_alloc();
+guacenc_buffer* guacenc_buffer_alloc(void);
 
 /**
  * Frees all memory associated with the given buffer object. If the buffer

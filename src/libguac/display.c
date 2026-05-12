@@ -56,7 +56,7 @@
  *     The number of available processors, or zero if this value cannot be
  *     determined for any reason.
  */
-static unsigned long guac_display_nproc() {
+static unsigned long guac_display_nproc(void) {
 
 #if defined(HAVE_SCHED_GETAFFINITY)
 
@@ -218,8 +218,6 @@ void guac_display_free(guac_display* display) {
     /* All locks, FIFOs, etc. are now unused and can be safely destroyed */
     guac_flag_destroy(&display->render_state);
     guac_fifo_destroy(&display->ops);
-    guac_rwlock_destroy(&display->last_frame.lock);
-    guac_rwlock_destroy(&display->pending_frame.lock);
 
     /* Free all layers within the pending_frame list (NOTE: This will also free
      * those layers from the last_frame list) */
@@ -230,6 +228,9 @@ void guac_display_free(guac_display* display) {
      * and not on the pending_frame list */
     while (display->last_frame.layers != NULL)
         guac_display_free_layer(display->last_frame.layers);
+
+    guac_rwlock_destroy(&display->last_frame.lock);
+    guac_rwlock_destroy(&display->pending_frame.lock);
 
     guac_mem_free(display);
 
@@ -309,14 +310,15 @@ void guac_display_dup(guac_display* display, guac_socket* socket) {
 
     }
 
-    /* Synchronize mouse cursor */
+    /* Avoid sending a zero-size cursor instruction if no cursor has been set */
     guac_display_layer* cursor = display->cursor_buffer;
-    guac_protocol_send_cursor(socket,
-            display->last_frame.cursor_hotspot_x,
-            display->last_frame.cursor_hotspot_y,
-            cursor->layer, 0, 0,
-            cursor->last_frame.width,
-            cursor->last_frame.height);
+    if (cursor->last_frame.width > 0 && cursor->last_frame.height > 0)
+        guac_protocol_send_cursor(socket,
+                display->last_frame.cursor_hotspot_x,
+                display->last_frame.cursor_hotspot_y,
+                cursor->layer, 0, 0,
+                cursor->last_frame.width,
+                cursor->last_frame.height);
 
     /* Synchronize mouse location */
     guac_protocol_send_mouse(socket, display->last_frame.cursor_x, display->last_frame.cursor_y,

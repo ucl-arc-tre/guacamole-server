@@ -140,6 +140,7 @@ const char* GUAC_RDP_CLIENT_ARGS[] = {
 
     "load-balance-info",
 
+    "clipboard-buffer-size",
     "disable-copy",
     "disable-paste",
     
@@ -658,6 +659,11 @@ enum RDP_ARGS_IDX {
      * the connection broker, if a connection broker is being used.
      */
     IDX_LOAD_BALANCE_INFO,
+    
+    /**
+     * The maximum number of bytes to allow within the clipboard.
+     */
+    IDX_CLIPBOARD_BUFFER_SIZE,
 
     /**
      * Whether outbound clipboard access should be blocked. If set to "true",
@@ -832,9 +838,10 @@ guac_rdp_settings* guac_rdp_parse_args(guac_user* user,
                 IDX_HOSTNAME, "");
 
     /* If port specified, use it, otherwise use an appropriate default */
-    settings->port =
-        guac_user_parse_args_int(user, GUAC_RDP_CLIENT_ARGS, argv, IDX_PORT,
-                settings->security_mode == GUAC_SECURITY_VMCONNECT ? RDP_DEFAULT_VMCONNECT_PORT : RDP_DEFAULT_PORT);
+    settings->port = (unsigned short)
+        guac_user_parse_args_int_bounded(user, GUAC_RDP_CLIENT_ARGS, argv, IDX_PORT,
+                settings->security_mode == GUAC_SECURITY_VMCONNECT ? RDP_DEFAULT_VMCONNECT_PORT : RDP_DEFAULT_PORT,
+                GUAC_ITOA_USHORT_MIN, GUAC_ITOA_USHORT_MAX);
 
     /* Look for timeout settings and parse or set defaults. */
     settings->timeout =
@@ -1109,8 +1116,8 @@ guac_rdp_settings* guac_rdp_parse_args(guac_user* user,
 
     /* Port for SFTP connection */
     settings->sftp_port =
-        guac_user_parse_args_string(user, GUAC_RDP_CLIENT_ARGS, argv,
-                IDX_SFTP_PORT, "22");
+        guac_user_parse_args_int_string_bounded(user, GUAC_RDP_CLIENT_ARGS, argv,
+                IDX_SFTP_PORT, "22", GUAC_ITOA_USHORT_MIN, GUAC_ITOA_USHORT_MAX);
 
     /* SFTP timeout */
     settings->sftp_timeout =
@@ -1260,9 +1267,9 @@ guac_rdp_settings* guac_rdp_parse_args(guac_user* user,
                 IDX_GATEWAY_HOSTNAME, NULL);
 
     /* If gateway port specified, use it */
-    settings->gateway_port =
-        guac_user_parse_args_int(user, GUAC_RDP_CLIENT_ARGS, argv,
-                IDX_GATEWAY_PORT, 443);
+    settings->gateway_port = (unsigned short)
+        guac_user_parse_args_int_bounded(user, GUAC_RDP_CLIENT_ARGS, argv,
+                IDX_GATEWAY_PORT, 443, GUAC_ITOA_USHORT_MIN, GUAC_ITOA_USHORT_MAX);
 
     /* Set gateway domain */
     settings->gateway_domain =
@@ -1283,6 +1290,27 @@ guac_rdp_settings* guac_rdp_parse_args(guac_user* user,
     settings->load_balance_info =
         guac_user_parse_args_string(user, GUAC_RDP_CLIENT_ARGS, argv,
                 IDX_LOAD_BALANCE_INFO, NULL);
+
+    /* Set the maximum number of bytes to allow within the clipboard. */
+    settings->clipboard_buffer_size =
+        guac_user_parse_args_int(user, GUAC_RDP_CLIENT_ARGS, argv,
+                IDX_CLIPBOARD_BUFFER_SIZE, 0);
+
+    /* Use default clipboard buffer size if given one is invalid. */
+    if (settings->clipboard_buffer_size < GUAC_COMMON_CLIPBOARD_MIN_LENGTH) {
+        settings->clipboard_buffer_size = GUAC_COMMON_CLIPBOARD_MIN_LENGTH;
+        guac_user_log(user, GUAC_LOG_INFO, "Unspecified or invalid clipboard buffer "
+                "size: \"%s\". Using the default minimum size: %i.",
+                argv[IDX_CLIPBOARD_BUFFER_SIZE],
+                settings->clipboard_buffer_size);
+    }
+    else if (settings->clipboard_buffer_size > GUAC_COMMON_CLIPBOARD_MAX_LENGTH) {
+        settings->clipboard_buffer_size = GUAC_COMMON_CLIPBOARD_MAX_LENGTH;
+        guac_user_log(user, GUAC_LOG_WARNING, "Invalid clipboard buffer "
+                "size: \"%s\". Using the default maximum size: %i.",
+                argv[IDX_CLIPBOARD_BUFFER_SIZE],
+                settings->clipboard_buffer_size);
+    }
 
     /* Parse clipboard copy disable flag */
     settings->disable_copy =
@@ -1330,9 +1358,9 @@ guac_rdp_settings* guac_rdp_parse_args(guac_user* user,
     if (settings->wol_send_packet) {
         
         /* If WoL has been requested but no MAC address given, log a warning. */
-        if(strcmp(argv[IDX_WOL_MAC_ADDR], "") == 0) {
-            guac_user_log(user, GUAC_LOG_WARNING, "WoL requested but no MAC ",
-                    "address specified.  WoL will not be sent.");
+        if (strcmp(argv[IDX_WOL_MAC_ADDR], "") == 0) {
+            guac_user_log(user, GUAC_LOG_WARNING, "WoL was enabled, but no "
+                    "MAC address was provided. WoL will not be sent.");
             settings->wol_send_packet = 0;
         }
         
@@ -1348,8 +1376,8 @@ guac_rdp_settings* guac_rdp_parse_args(guac_user* user,
         
         /* Parse the WoL broadcast port. */
         settings->wol_udp_port = (unsigned short)
-            guac_user_parse_args_int(user, GUAC_RDP_CLIENT_ARGS, argv,
-                IDX_WOL_UDP_PORT, GUAC_WOL_PORT);
+            guac_user_parse_args_int_bounded(user, GUAC_RDP_CLIENT_ARGS, argv,
+                IDX_WOL_UDP_PORT, GUAC_WOL_PORT, GUAC_ITOA_USHORT_MIN, GUAC_ITOA_USHORT_MAX);
         
         /* Parse the WoL wait time. */
         settings->wol_wait_time =
@@ -1684,6 +1712,7 @@ void guac_rdp_push_settings(guac_client* client,
         freerdp_settings_set_bool(rdp_settings, FreeRDP_Workarea, TRUE);
         freerdp_settings_set_bool(rdp_settings, FreeRDP_RemoteApplicationMode, TRUE);
         freerdp_settings_set_bool(rdp_settings, FreeRDP_RemoteAppLanguageBarSupported, TRUE);
+        freerdp_settings_set_bool(rdp_settings, FreeRDP_HiDefRemoteApp, guac_settings->enable_gfx);
         freerdp_settings_set_string(rdp_settings, FreeRDP_RemoteApplicationProgram, guac_strdup(guac_settings->remote_app));
         freerdp_settings_set_string(rdp_settings, FreeRDP_ShellWorkingDirectory, guac_strdup(guac_settings->remote_app_dir));
         freerdp_settings_set_string(rdp_settings, FreeRDP_RemoteApplicationCmdLine, guac_strdup(guac_settings->remote_app_args));
@@ -1919,6 +1948,7 @@ void guac_rdp_push_settings(guac_client* client,
         rdp_settings->Workarea = TRUE;
         rdp_settings->RemoteApplicationMode = TRUE;
         rdp_settings->RemoteAppLanguageBarSupported = TRUE;
+        rdp_settings->HiDefRemoteApp = guac_settings->enable_gfx;
         rdp_settings->RemoteApplicationProgram = guac_strdup(guac_settings->remote_app);
         rdp_settings->ShellWorkingDirectory = guac_strdup(guac_settings->remote_app_dir);
         rdp_settings->RemoteApplicationCmdLine = guac_strdup(guac_settings->remote_app_args);

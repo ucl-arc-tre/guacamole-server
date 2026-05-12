@@ -181,13 +181,10 @@ static void XFW_guac_display_layer_buffer_resize(guac_display_layer_state* frame
 static void PFW_LFW_guac_display_layer_state_init(guac_display_layer_state* last_frame,
         guac_display_layer_state* pending_frame) {
 
-    last_frame->width = pending_frame->width = GUAC_DISPLAY_RESIZE_FACTOR;
-    last_frame->height = pending_frame->height = GUAC_DISPLAY_RESIZE_FACTOR;
+    pending_frame->width = GUAC_DISPLAY_RESIZE_FACTOR;
+    pending_frame->height = GUAC_DISPLAY_RESIZE_FACTOR;
     last_frame->opacity = pending_frame->opacity = 0xFF;
     last_frame->parent = pending_frame->parent = GUAC_DEFAULT_LAYER;
-
-    XFW_guac_display_layer_buffer_resize(last_frame,
-            last_frame->width, last_frame->height);
 
     XFW_guac_display_layer_buffer_resize(pending_frame,
             pending_frame->width, pending_frame->height);
@@ -258,6 +255,8 @@ guac_display_layer* guac_display_add_layer(guac_display* display, guac_layer* la
     display_layer->display = display;
     display_layer->layer = layer;
     display_layer->opaque = opaque;
+
+    pthread_mutex_init(&display_layer->path_lock, NULL);
 
     /* Init tracking of pending and last frames (NOTE: We need not acquire the
      * display-wide last_frame.lock here as this new layer will not actually be
@@ -363,6 +362,8 @@ void guac_display_remove_layer(guac_display_layer* display_layer) {
 
     guac_mem_free(display_layer->last_frame.buffer);
     guac_mem_free(display_layer->pending_frame_cells);
+
+    pthread_mutex_destroy(&display_layer->path_lock);
 
     guac_mem_free(display_layer);
 

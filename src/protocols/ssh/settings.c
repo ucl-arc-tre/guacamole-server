@@ -22,13 +22,16 @@
 #include "argv.h"
 #include "client.h"
 #include "common/defaults.h"
+#include "common/clipboard.h"
 #include "settings.h"
 #include "terminal/terminal.h"
 
 #include <guacamole/mem.h>
+#include <guacamole/string.h>
 #include <guacamole/user.h>
 #include <guacamole/wol-constants.h>
 
+#include <limits.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -69,10 +72,12 @@ const char* GUAC_SSH_CLIENT_ARGS[] = {
     "read-only",
     "server-alive-interval",
     "backspace",
+    "func-keys-and-keypad",
     "terminal-type",
     "scrollback",
     "locale",
     "timezone",
+    "clipboard-buffer-size",
     "disable-copy",
     "disable-paste",
     "wol-send-packet",
@@ -282,6 +287,12 @@ enum SSH_ARGS_IDX {
     IDX_BACKSPACE,
 
     /**
+     * The family of codes (e.g. vt100) which will be used when you push
+     * the function and keypad keys.
+     */
+    IDX_FUNC_KEYS_AND_KEYPAD,
+
+    /**
      * The terminal emulator type that is passed to the remote system (e.g.
      * "xterm" or "xterm-256color"). "linux" is used if unspecified.
      */
@@ -309,6 +320,11 @@ enum SSH_ARGS_IDX {
      * https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
      */
     IDX_TIMEZONE,
+
+    /**
+     * The maximum number of bytes to allow within the clipboard.
+     */
+    IDX_CLIPBOARD_BUFFER_SIZE,
 
     /**
      * Whether outbound clipboard access should be blocked. If set to "true",
@@ -457,8 +473,8 @@ guac_ssh_settings* guac_ssh_parse_args(guac_user* user,
 
     /* Read port */
     settings->port =
-        guac_user_parse_args_string(user, GUAC_SSH_CLIENT_ARGS, argv,
-                IDX_PORT, GUAC_SSH_DEFAULT_PORT);
+        guac_user_parse_args_int_string_bounded(user, GUAC_SSH_CLIENT_ARGS, argv,
+                IDX_PORT, GUAC_SSH_DEFAULT_PORT, GUAC_ITOA_USHORT_MIN, GUAC_ITOA_USHORT_MAX);
 
     /* Parse the timeout value. */
     settings->timeout =
@@ -540,6 +556,11 @@ guac_ssh_settings* guac_ssh_parse_args(guac_user* user,
         guac_user_parse_args_int(user, GUAC_SSH_CLIENT_ARGS, argv,
                 IDX_BACKSPACE, GUAC_TERMINAL_DEFAULT_BACKSPACE);
 
+    /* Copy the family of codes for function keys and keypad */
+    settings->func_keys_and_keypad =
+        guac_user_parse_args_string(user, GUAC_SSH_CLIENT_ARGS, argv,
+                IDX_FUNC_KEYS_AND_KEYPAD, "");
+
     /* Read terminal emulator type. */
     settings->terminal_type =
         guac_user_parse_args_string(user, GUAC_SSH_CLIENT_ARGS, argv,
@@ -554,6 +575,27 @@ guac_ssh_settings* guac_ssh_parse_args(guac_user* user,
     settings->timezone =
         guac_user_parse_args_string(user, GUAC_SSH_CLIENT_ARGS, argv,
                 IDX_TIMEZONE, user->info.timezone);
+
+    /* Set the maximum number of bytes to allow within the clipboard. */
+    settings->clipboard_buffer_size =
+        guac_user_parse_args_int(user, GUAC_SSH_CLIENT_ARGS, argv,
+                IDX_CLIPBOARD_BUFFER_SIZE, 0);
+
+    /* Use default clipboard buffer size if given one is invalid. */
+    if (settings->clipboard_buffer_size < GUAC_COMMON_CLIPBOARD_MIN_LENGTH) {
+        settings->clipboard_buffer_size = GUAC_COMMON_CLIPBOARD_MIN_LENGTH;
+        guac_user_log(user, GUAC_LOG_INFO, "Unspecified or invalid clipboard buffer "
+                "size: \"%s\". Using the default minimum size: %i.",
+                argv[IDX_CLIPBOARD_BUFFER_SIZE],
+                settings->clipboard_buffer_size);
+    }
+    else if (settings->clipboard_buffer_size > GUAC_COMMON_CLIPBOARD_MAX_LENGTH) {
+        settings->clipboard_buffer_size = GUAC_COMMON_CLIPBOARD_MAX_LENGTH;
+        guac_user_log(user, GUAC_LOG_WARNING, "Invalid clipboard buffer "
+                "size: \"%s\". Using the default maximum size: %i.",
+                argv[IDX_CLIPBOARD_BUFFER_SIZE],
+                settings->clipboard_buffer_size);
+    }
 
     /* Parse clipboard copy disable flag */
     settings->disable_copy =
@@ -573,8 +615,8 @@ guac_ssh_settings* guac_ssh_parse_args(guac_user* user,
     if (settings->wol_send_packet) {
         
         if (strcmp(argv[IDX_WOL_MAC_ADDR], "") == 0) {
-            guac_user_log(user, GUAC_LOG_WARNING, "WoL was enabled, but no ",
-                    "MAC address was provide.  WoL will not be sent.");
+            guac_user_log(user, GUAC_LOG_WARNING, "WoL was enabled, but no "
+                    "MAC address was provided. WoL will not be sent.");
             settings->wol_send_packet = false;
         }
         
@@ -587,8 +629,8 @@ guac_ssh_settings* guac_ssh_parse_args(guac_user* user,
                 IDX_WOL_BROADCAST_ADDR, GUAC_WOL_LOCAL_IPV4_BROADCAST);
         
         settings->wol_udp_port = (unsigned short)
-            guac_user_parse_args_int(user, GUAC_SSH_CLIENT_ARGS, argv,
-                IDX_WOL_UDP_PORT, GUAC_WOL_PORT);
+            guac_user_parse_args_int_bounded(user, GUAC_SSH_CLIENT_ARGS, argv,
+                IDX_WOL_UDP_PORT, GUAC_WOL_PORT, GUAC_ITOA_USHORT_MIN, GUAC_ITOA_USHORT_MAX);
         
         settings->wol_wait_time =
             guac_user_parse_args_int(user, GUAC_SSH_CLIENT_ARGS, argv,

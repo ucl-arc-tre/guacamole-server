@@ -25,6 +25,7 @@
 #include <fcntl.h>
 #include <netdb.h>
 #include <netinet/in.h>
+#include <string.h>
 #include <sys/select.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -50,7 +51,7 @@ int guac_tcp_connect(const char* hostname, const char* port, const int timeout) 
     if ((retval = getaddrinfo(hostname, port, &hints, &addresses))) {
         guac_error = GUAC_STATUS_INVALID_ARGUMENT;
         guac_error_message = "Error parsing address or port.";
-        return retval;
+        return -1;
     }
 
     /* Attempt connection to each address until success */
@@ -83,6 +84,7 @@ int guac_tcp_connect(const char* hostname, const char* port, const int timeout) 
             guac_error = GUAC_STATUS_INVALID_ARGUMENT;
             guac_error_message = "Failed to retrieve socket options.";
             close(fd);
+            fd = -1;
             continue;
         }
 
@@ -91,29 +93,77 @@ int guac_tcp_connect(const char* hostname, const char* port, const int timeout) 
             guac_error = GUAC_STATUS_INVALID_ARGUMENT;
             guac_error_message = "Failed to set non-blocking socket.";
             close(fd);
+            fd = -1;
             continue;
         }
 
-        /* Structure that stores our timeout setting. */
         struct timeval tv;
         tv.tv_sec = timeout;
         tv.tv_usec = 0;
 
         /* Connect and wait for timeout */
         if ((retval = connect(fd, current_address->ai_addr, current_address->ai_addrlen)) < 0) {
-            if (errno == EINPROGRESS) {
-                /* Set up timeout. */
+            /* If connect() is in progress (EINPROGRESS) or interrupted by a signal
+             * (EINTR), wait for the socket to become writable and check SO_ERROR. */
+            if (errno == EINPROGRESS || errno == EINTR) {
+
+                /* Prevent overflowing fd_set. */
+                if (fd >= FD_SETSIZE) {
+                    guac_error = GUAC_STATUS_INVALID_ARGUMENT;
+                    guac_error_message = "File descriptor exceeds FD_SETSIZE.";
+                    close(fd);
+                    fd = -1;
+                    continue;
+                }
+
                 fd_set fdset;
                 FD_ZERO(&fdset);
                 FD_SET(fd, &fdset);
-                
-                retval = select(fd + 1, NULL, &fdset, NULL, &tv);
+
+                /* Linux (kernel/glibc verified): select() does not modify
+                   fd_set on -1, and updates struct timeval to reflect elapsed
+                   time on EINTR, so neither needs reinitialization on retry. */
+                GUAC_RETRY_EINTR(retval, select(fd + 1, NULL, &fdset, NULL, &tv));
+
+                if (retval > 0) {
+                    int so_error = 0;
+                    socklen_t so_error_len = sizeof(so_error);
+                    retval = getsockopt(fd, SOL_SOCKET, SO_ERROR, &so_error, &so_error_len);
+
+                    /* Error occurs retrieving the socket status, so we set it
+                       and move on. */
+                    if (retval < 0) {
+                        guac_error = GUAC_STATUS_INVALID_ARGUMENT;
+                        guac_error_message = "Failed to retrieve socket status.";
+                        close(fd);
+                        fd = -1;
+                        continue;
+                    }
+
+                    /* This indicates that the connection is successful, so we
+                       break so that the socket can be immediately returned. */
+                    if (so_error == 0) {
+                        break;
+                    }
+
+                    /* There's a socket error, so we retrieve it and move to
+                       the next address. */
+                    else {
+                        guac_error = GUAC_STATUS_REFUSED;
+                        guac_error_message = strerror(so_error);
+                        close(fd);
+                        fd = -1;
+                        continue;
+                    }
+                }
+
             }
-            
+
             else {
                 guac_error = GUAC_STATUS_REFUSED;
                 guac_error_message = "Unable to connect via socket.";
                 close(fd);
+                fd = -1;
                 continue;
             }
         }
@@ -125,6 +175,7 @@ int guac_tcp_connect(const char* hostname, const char* port, const int timeout) 
                 guac_error = GUAC_STATUS_INVALID_ARGUMENT;
                 guac_error_message = "Failed to reset socket options.";
                 close(fd);
+                fd = -1;
                 continue;
             }
 
@@ -142,7 +193,7 @@ int guac_tcp_connect(const char* hostname, const char* port, const int timeout) 
 
         /* Some error has occurred - free resources before next iteration. */
         close(fd);
-
+        fd = -1;
     }
 
     /* Free addrinfo */
@@ -152,6 +203,7 @@ int guac_tcp_connect(const char* hostname, const char* port, const int timeout) 
     if (current_address == NULL) {
         guac_error = GUAC_STATUS_REFUSED;
         guac_error_message = "Unable to connect to remote host.";
+        fd = -1;
     }
 
     /* Return the fd, or the error message if the socket connection failed. */

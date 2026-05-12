@@ -20,8 +20,6 @@
 #ifndef GUAC_VNC_DISPLAY_H
 #define GUAC_VNC_DISPLAY_H
 
-#include "config.h"
-
 #include <guacamole/user.h>
 #include <rfb/rfbclient.h>
 #include <rfb/rfbproto.h>
@@ -117,6 +115,17 @@ void* guac_vnc_display_set_owner_size(guac_user* owner, void* data);
  *     The height that is being requested, in pixels.
  */
 void guac_vnc_display_set_size(rfbClient* client, int requested_width, int requested_height);
+
+/**
+ * Callback invoked by libVNCServer when all rectangles within a single
+ * FramebufferUpdate message have been fully processed. Signals the render
+ * thread that an explicit frame boundary has been reached.
+ *
+ * @param client
+ *     The VNC client associated with the VNC session in which the update
+ *     was completed.
+ */
+void guac_vnc_finished_frame(rfbClient* client);
 
 /**
  * Sets the pixel format to request of the VNC server. The request will be made

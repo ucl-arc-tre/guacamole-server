@@ -20,8 +20,6 @@
 #ifndef GUAC_VNC_VNC_H
 #define GUAC_VNC_VNC_H
 
-#include "config.h"
-
 #include "common/clipboard.h"
 #include "common/iconv.h"
 #include "display.h"
@@ -96,6 +94,11 @@ typedef struct guac_vnc_client {
      * by the VNC server.
      */
     int copy_rect_used;
+
+    /**
+     * Whether the first FinishedFrameBufferUpdate callback has been logged.
+     */
+    int finished_frame_logged;
 
     /**
      * Client settings, parsed from args.
@@ -214,4 +217,3 @@ void* guac_vnc_client_thread(void* data);
 extern char* GUAC_VNC_CLIENT_KEY;
 
 #endif
-

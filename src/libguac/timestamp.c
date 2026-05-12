@@ -19,15 +19,17 @@
 
 #include "config.h"
 
+#include "guacamole/error.h"
 #include "guacamole/timestamp.h"
 
+#include <errno.h>
 #include <sys/time.h>
 
 #if defined(HAVE_CLOCK_GETTIME) || defined(HAVE_NANOSLEEP)
 #include <time.h>
 #endif
 
-guac_timestamp guac_timestamp_current() {
+guac_timestamp guac_timestamp_current(void) {
 
 #ifdef HAVE_CLOCK_GETTIME
 
@@ -66,7 +68,8 @@ void guac_timestamp_msleep(int duration) {
     };
 
     /* Sleep for specified interval */
-    nanosleep(&sleep_period, NULL);
+    int sleep_result;
+    GUAC_RETRY_EINTR(sleep_result, nanosleep(&sleep_period, &sleep_period));
 
 }
 

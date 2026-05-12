@@ -35,6 +35,7 @@
 #include <libssh2.h>
 #include <libssh2_sftp.h>
 #include <guacamole/client.h>
+#include <guacamole/error.h>
 #include <guacamole/mem.h>
 #include <guacamole/recording.h>
 #include <guacamole/socket.h>
@@ -242,7 +243,8 @@ void* ssh_client_thread(void* data) {
          */
         if (settings->wol_wait_time > 0) {
             guac_client_log(client, GUAC_LOG_DEBUG, "Sending Wake-on-LAN packet, "
-                    "and pausing for %d seconds.", settings->wol_wait_time);
+                "and retrying connection check %d times every %d seconds.",
+                GUAC_WOL_DEFAULT_CONNECT_RETRIES, settings->wol_wait_time);
 
             /* Send the Wake-on-LAN request and wait until the server is responsive. */
             if (guac_wol_wake_and_wait(settings->wol_mac_addr,
@@ -253,17 +255,21 @@ void* ssh_client_thread(void* data) {
                     settings->hostname,
                     settings->port,
                     settings->timeout)) {
-                guac_client_log(client, GUAC_LOG_ERROR, "Failed to send WOL packet or connect to remote server.");
+                guac_client_log(client, GUAC_LOG_ERROR, "Failed to send WOL packet, or connect to remote server.");
                 return NULL;
             }
         }
 
-        /* Just send the packet and continue the connection, or return if failed. */
-        else if(guac_wol_wake(settings->wol_mac_addr,
+        /* Just send the packet, or return NULL if failed. */
+        else {
+            guac_client_log(client, GUAC_LOG_DEBUG, "Sending Wake-on-LAN packet.");
+
+            if (guac_wol_wake(settings->wol_mac_addr,
                     settings->wol_broadcast_addr,
                     settings->wol_udp_port)) {
-            guac_client_log(client, GUAC_LOG_ERROR, "Failed to send WOL packet.");
-            return NULL;
+                guac_client_log(client, GUAC_LOG_ERROR, "Failed to send WOL packet.");
+                return NULL;
+            }
         }
     }
 
@@ -294,12 +300,14 @@ void* ssh_client_thread(void* data) {
             settings->width, settings->height, settings->resolution);
 
     /* Set optional parameters */
+    options->clipboard_buffer_size = settings->clipboard_buffer_size;
     options->disable_copy = settings->disable_copy;
     options->max_scrollback = settings->max_scrollback;
     options->font_name = settings->font_name;
     options->font_size = settings->font_size;
     options->color_scheme = settings->color_scheme;
     options->backspace = settings->backspace;
+    options->func_keys_and_keypad = settings->func_keys_and_keypad;
 
     /* Create terminal */
     ssh_client->term = guac_terminal_create(client, options);
@@ -553,8 +561,11 @@ void* ssh_client_thread(void* data) {
                 .revents = 0,
             }};
 
+            int wait_result;
             /* Wait up to computed timeout */
-            if (poll(fds, 1, timeout) < 0)
+            GUAC_RETRY_EINTR(wait_result, poll(fds, 1, timeout));
+
+            if (wait_result < 0)
                 break;
 
         }
@@ -571,4 +582,3 @@ void* ssh_client_thread(void* data) {
     return NULL;
 
 }
-
